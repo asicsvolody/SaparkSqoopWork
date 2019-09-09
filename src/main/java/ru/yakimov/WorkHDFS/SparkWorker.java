@@ -1,5 +1,7 @@
 package ru.yakimov.WorkHDFS;
 
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
 import org.apache.spark.sql.Dataset;
@@ -11,7 +13,6 @@ import org.apache.spark.storage.StorageLevel;
 import ru.yakimov.WorkHDFS.Exceptions.MoreOneUserWithIdException;
 import ru.yakimov.WorkHDFS.Exceptions.NotDirectoryException;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,92 +20,119 @@ import java.util.List;
 
 public class SparkWorker {
 
-    SparkSession spark;
+    private SparkSession spark;
 
-    Dataset<Row> data;
+    private Dataset<Row> data;
 
-    Runtime rt ;
+    private Runtime rt ;
 
-    public static final String USER_DIR_PATH = "/avroData/usersDB";
-    public static final String NEW_USERS_DIR_PATH = "/avroData/newUsersDB";
+    private FileSystem fs;
+
+    public static final Path USER_DIR_PATH = new Path("/avroData/usersDB");
+    public static final Path NEW_USERS_DIR_PATH = new Path("/avroData/newUsersDB");
+    public static final Path RES_PATH = new Path("/avroData/res");
+
+
 
     private StructType structType;
 
 
-    private final String PRIMARY_KEY_FILD_NAME = "user_id";
+    private final String PRIMARY_KEY_FIELD_NAME = "user_id";
     private final String ACTION_FIELD = "user_action";
+
 
 
 
     public static final String WORK_TABLE = "users";
     public static final String WORK_DB = "usersDB";
+    public static final String SAVE_TO_TABLE = "resUsers";
 
 
 
-    public static final String NEW_DATA_TEBLE = "newUsers";
+
+
+
+    public static final String NEW_DATA_TABLE = "newUsers";
     public static final String NEW_DATA_DB = "newUsersDB";
 
 
 
 
-    public SparkWorker() throws FileNotFoundException, NotDirectoryException {
+
+    public SparkWorker() throws IOException, NotDirectoryException, InterruptedException {
 
         SparkContext context = new SparkContext(new SparkConf().setAppName("spark-App").setMaster("local[*]")
-                .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020").set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
+                .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
+                .set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
                 .set("spark.hadoop.fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName())
                 .set("spark.hadoop.fs.hdfs.server", org.apache.hadoop.hdfs.server.namenode.NameNode.class.getName())
                 .set("spark.hadoop.conf", org.apache.hadoop.hdfs.HdfsConfiguration.class.getName()));
+
         context.setLogLevel("WARN");
-//        FileSystem hdfs = FileSystem.get()
+
         spark = SparkSession.builder().sparkContext(context).getOrCreate();
 
         rt = Runtime.getRuntime();
 
-//        try {
-//            if(new File(USER_DIR_PATH).exists())
-//                deleteDir(USER_DIR_PATH);
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-
-        try {
-            readTableToHDFS(WORK_DB,WORK_TABLE, USER_DIR_PATH);
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        try{
-            readTableToHDFS(NEW_DATA_DB, NEW_DATA_TEBLE, NEW_USERS_DIR_PATH);
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-        }
+        fs = FileSystem.get(context.hadoopConfiguration());
 
 
-        data = getDatasetFromDir(USER_DIR_PATH);
+        newDataProcessing();
+
+
+
+
+
+    }
+
+    private void newDataProcessing() throws IOException, InterruptedException{
+        deleteOldDir();
+
+        sqoopImportTableToHDFS(WORK_DB,WORK_TABLE, USER_DIR_PATH.toString());
+
+
+        sqoopImportTableToHDFS(NEW_DATA_DB, NEW_DATA_TABLE, NEW_USERS_DIR_PATH.toString());
+
+
+        data = getDatasetFromDir(USER_DIR_PATH.toString());
         structType = data.first().schema();
         data.show();
 
-        usingNewDataFromDir(NEW_USERS_DIR_PATH);
+        usingNewDataFromDir(NEW_USERS_DIR_PATH.toString());
 
         data.show();
 
+        saveToHDFS();
 
-//        Dataset<Row> newUsers = getDatasetFromDir(NEW_USERS_DIR_PATH);
-//        newUsers.show();
+        sqoopExportTable(WORK_DB, SAVE_TO_TABLE, RES_PATH.toString());
 
+    }
 
+    private void deleteOldDir() throws IOException {
 
+        System.out.println("Delete old directories");
+
+        if(fs.exists(USER_DIR_PATH))
+            fs.delete(USER_DIR_PATH, true);
+
+        if(fs.exists(NEW_USERS_DIR_PATH))
+            fs.delete(NEW_USERS_DIR_PATH, true);
     }
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
+
+        System.out.println("Spark read data from dir: "+userDirPath);
+
         return spark.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
     }
 
-    private void usingNewDataFromDir(String dirPath) throws FileNotFoundException, NotDirectoryException {
-        Dataset<Row> newData = null;
+    private void usingNewDataFromDir(String dirPath) {
+
+        System.out.println("Spark using new Data from dir: "+dirPath);
+
         List<Row> newRows = new ArrayList<>();
 
-        newData = getDatasetFromDir(dirPath);
+        Dataset<Row> newData = getDatasetFromDir(dirPath);
 
         newData.show();
 
@@ -138,9 +166,23 @@ public class SparkWorker {
         }
 
         addToData(newRows);
-//        save();
 
     }
+
+    public void saveToHDFS() throws IOException {
+
+        System.out.println("Spark write Dataset to HDFS path: "+RES_PATH.toString());
+
+        if(fs.exists(RES_PATH))
+            fs.delete(RES_PATH, true);
+
+
+        data.write().option("header", true).option("inferSchema", true).format("avro").save(RES_PATH.toString());
+
+    }
+
+
+
     private Row insertRow(Row row) throws MoreOneUserWithIdException {
         if(isLineWithPrimaryKay(getPrimaryValue(row))){
             throw new MoreOneUserWithIdException(getPrimaryValue(row)+ " is used");
@@ -153,14 +195,14 @@ public class SparkWorker {
         return row
                 .getString(row
                         .schema()
-                        .fieldIndex(PRIMARY_KEY_FILD_NAME));
+                        .fieldIndex(PRIMARY_KEY_FIELD_NAME));
     }
 
     private void addToData(List<Row> newRows) {
         data = spark
                 .createDataFrame(newRows, structType)
                 .union(data)
-                .sort(PRIMARY_KEY_FILD_NAME)
+                .sort(PRIMARY_KEY_FIELD_NAME)
                 .persist(StorageLevel.MEMORY_AND_DISK());
     }
 
@@ -191,10 +233,10 @@ public class SparkWorker {
     private String[] getNewDataFromTwoRows(Row newRow, Row oldRow) {
         String [] resData = oldRow.schema().fieldNames();
         for (int i = 0; i < resData.length; i++) {
-            String fildData = getDataFromField(newRow , resData[i]);
-            resData[i] = (fildData == null)
+            String fieldData = getDataFromField(newRow , resData[i]);
+            resData[i] = (fieldData == null)
                     ? getDataFromField(oldRow , resData[i])
-                    : fildData;
+                    : fieldData;
         }
 
         return resData;
@@ -209,18 +251,18 @@ public class SparkWorker {
     private Row getRowForPrimaryKey(String primaryValue) throws MoreOneUserWithIdException {
         data.createOrReplaceTempView("users");
 
-        Dataset<Row> oneUser= spark.sql(String.format("SELECT * FROM users WHERE %s = %s", PRIMARY_KEY_FILD_NAME,primaryValue));
+        Dataset<Row> oneUser= spark.sql(String.format("SELECT * FROM users WHERE %s = %s", PRIMARY_KEY_FIELD_NAME,primaryValue));
         if(oneUser.count() == 0)
             return null;
         if(oneUser.count() >1)
-            throw new MoreOneUserWithIdException(PRIMARY_KEY_FILD_NAME + " = "+ primaryValue);
+            throw new MoreOneUserWithIdException(PRIMARY_KEY_FIELD_NAME + " = "+ primaryValue);
         return oneUser.first();
     }
 
 
     private void deleteThisLine(String value){
         data.createOrReplaceTempView("users");
-        data = spark.sql(String.format("SELECT * FROM users WHERE %s != %s", PRIMARY_KEY_FILD_NAME, value)).persist(StorageLevel.MEMORY_AND_DISK());
+        data = spark.sql(String.format("SELECT * FROM users WHERE %s != %s", PRIMARY_KEY_FIELD_NAME, value)).persist(StorageLevel.MEMORY_AND_DISK());
     }
 
     private Row getNewRow(Row dataRow) {
@@ -240,11 +282,15 @@ public class SparkWorker {
     }
 
     private boolean isFieldWithName(String fieldName, Row row) {
-        return row.schema().fieldIndex(fieldName)>= 0;
+        return row
+                .schema()
+                .fieldIndex(fieldName)>= 0;
     }
 
 
-    public void readTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
+    public void sqoopImportTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
+
+        System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath );
 
         rt.exec(String.format("sqoop import " +
                 "--connect \"jdbc:mysql://localhost:3306/%s?serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL\" " +
@@ -253,14 +299,23 @@ public class SparkWorker {
                 "--table %s " +
                 "--target-dir %s " +
                 "--split-by user_id  " +
-                "--as-avrodatafile",nameDB,tableName,compileToPath)).waitFor();
+                "--as-avrodatafile",nameDB,tableName,compileToPath))
+                .waitFor();
     }
 
+    public void sqoopExportTable(String nameDB, String tableName, String exportFromPath) throws IOException, InterruptedException {
+
+        System.out.println("Sqoop exports to table:" +tableName+" of database " + nameDB+ "from path directory: "+ exportFromPath );
 
 
-    public void deleteDir(String pathDir) throws IOException {
-        System.out.println(rt.exec(String.format("hadoop fs -rm -R %s",pathDir)));
-
+        rt.exec(String.format("sqoop export " +
+                "--connect \"jdbc:mysql://localhost:3306/%s?serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL\" " +
+                "--username vladimir  " +
+                "--password-file /user/sqoop.password " +
+                "--table %s " +
+                "--export-dir %s " +
+                "--validate",nameDB , tableName, exportFromPath))
+                .waitFor();
     }
 
 
@@ -268,7 +323,7 @@ public class SparkWorker {
         try {
             new SparkWorker();
 
-        } catch (FileNotFoundException | NotDirectoryException e) {
+        } catch (NotDirectoryException | IOException | InterruptedException e) {
             e.printStackTrace();
         }
     }
