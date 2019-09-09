@@ -30,7 +30,6 @@ public class SparkWorker {
 
     public static final Path USER_DIR_PATH = new Path("/avroData/usersDB");
     public static final Path NEW_USERS_DIR_PATH = new Path("/avroData/newUsersDB");
-    public static final Path RES_PATH = new Path("/avroData/res");
 
 
 
@@ -86,7 +85,7 @@ public class SparkWorker {
     }
 
     private void newDataProcessing() throws IOException, InterruptedException{
-        deleteOldDir();
+        deleteOldDir(USER_DIR_PATH ,NEW_USERS_DIR_PATH);
 
         sqoopImportTableToHDFS(WORK_DB,WORK_TABLE, USER_DIR_PATH.toString());
 
@@ -102,21 +101,22 @@ public class SparkWorker {
 
         data.show();
 
-        saveToHDFS();
+        saveToHDFS(USER_DIR_PATH);
 
-        sqoopExportTable(WORK_DB, SAVE_TO_TABLE, RES_PATH.toString());
+        sqoopExportTable(WORK_DB, SAVE_TO_TABLE, USER_DIR_PATH.toString());
+
+        deleteOldDir(USER_DIR_PATH, NEW_USERS_DIR_PATH);
 
     }
 
-    private void deleteOldDir() throws IOException {
+    private void deleteOldDir(Path ... paths) throws IOException {
 
-        System.out.println("Delete old directories");
-
-        if(fs.exists(USER_DIR_PATH))
-            fs.delete(USER_DIR_PATH, true);
-
-        if(fs.exists(NEW_USERS_DIR_PATH))
-            fs.delete(NEW_USERS_DIR_PATH, true);
+        for (Path path : paths) {
+            if(fs.exists(path)){
+                System.out.println("Delete old directory: " +path.toString());
+                fs.delete(USER_DIR_PATH, true);
+            }
+        }
     }
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
@@ -169,15 +169,15 @@ public class SparkWorker {
 
     }
 
-    public void saveToHDFS() throws IOException {
+    public void saveToHDFS(Path dirPath) throws IOException {
 
-        System.out.println("Spark write Dataset to HDFS path: "+RES_PATH.toString());
+        System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
 
-        if(fs.exists(RES_PATH))
-            fs.delete(RES_PATH, true);
+        if(fs.exists(dirPath))
+            fs.delete(dirPath, true);
 
 
-        data.write().option("header", true).option("inferSchema", true).format("avro").save(RES_PATH.toString());
+        data.write().option("header", true).option("inferSchema", true).format("avro").save(dirPath.toString());
 
     }
 
