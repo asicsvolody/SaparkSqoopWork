@@ -1,25 +1,22 @@
 package ru.yakimov.WorkHDFS;
 
-import org.apache.calcite.avatica.ColumnMetaData;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SparkSession;
+import org.apache.spark.SparkConf;
+import org.apache.spark.SparkContext;
+import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import ru.yakimov.WorkHDFS.Exceptions.MoreOneUserWithIdException;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class AddNewColumn implements Serializable {
 
-    private final SparkWorker SW;
 
     private final SparkSession SPARK;
     private final FileSystem FS;
@@ -28,19 +25,31 @@ public class AddNewColumn implements Serializable {
     public static final  String PRIMARY_KEY = "user_id";
 
 
+
     public static final Path NEW_DATA_DIR = new Path("/avroData/newData");
     public static final String NEW_DATA_DB = "newUsersDB";
     public static final String NEW_DATA_TABLE = "newData";
 
 
     public AddNewColumn() throws IOException {
-        SW = new SparkWorker();
-        this.SPARK = SW.getSpark();
-        this.FS = SW.getFs();
-        this.RT = SW.getRt();
+        SparkContext context = new SparkContext(new SparkConf().setAppName("spark-App").setMaster("local[*]")
+                .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
+                .set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
+                .set("spark.hadoop.fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName())
+                .set("spark.hadoop.fs.hdfs.server", org.apache.hadoop.hdfs.server.namenode.NameNode.class.getName())
+                .set("spark.hadoop.conf", org.apache.hadoop.hdfs.HdfsConfiguration.class.getName()));
+
+        context.setLogLevel("WARN");
+
+        SPARK = SparkSession.builder().sparkContext(context).getOrCreate();
+
+        RT = Runtime.getRuntime();
+
+        FS = FileSystem.get(context.hadoopConfiguration());
+
     }
 
-    public void getDataFromTable() throws IOException, InterruptedException, MoreOneUserWithIdException {
+    public void getDataFromTable() throws IOException, InterruptedException {
 
         Dataset<Row> data = getDataFromMySql(SparkWorker.WORK_DB, SparkWorker.WORK_TABLE, SparkWorker.USER_DIR_PATH);
         StructType dataType = data.first().schema();
@@ -51,42 +60,88 @@ public class AddNewColumn implements Serializable {
 
         List<Row> rowsForRecord = new ArrayList<>();
 
-        List<Row> newDataRows = newData.collectAsList();
+        List<Row> newDataRows = new ArrayList<>(newData.collectAsList());
 
 
         StructField[] newFields = getNewFields(dataType, newDataType);
 
         if(newFields != null){
             StructField[] oldFields = dataType.fields();
-            StructType resType = new StructType(ArrayUtils.addAll(newFields,oldFields));
-            System.out.println(resType.toString());
+            dataType = new StructType(ArrayUtils.addAll(newFields,oldFields));
+            System.out.println(dataType.toString());
+            data = data.map( );
 
 
-//             List<Row> dataList= data
-//                     .toJavaRDD()
-//                    .map(row -> SW.insertRow(row, PRIMARY_KEY, dataType)).collect();
+//             data = conversionDataForType(data, dataType);
+             data.show();
+
+
+//            newDataRows.addAll(newData.collectAsList());
+
+
+
+
+//            for (Row newDataRow : newDataRows) {
+//                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, resType, SparkWorker.WORK_TABLE, data));
+//            }
 //
-//            newDataRows.addAll(dataList);
-
-
-            for (Row newDataRow : newDataRows) {
-                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, resType, SparkWorker.WORK_TABLE, data));
-            }
-
-            data = SPARK.createDataFrame(rowsForRecord, resType);
-            data.show();
-        }else{
-
-            for (Row newDataRow : newDataRows) {
-                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, dataType, SparkWorker.WORK_TABLE,data));
-            }
-
-            data = SPARK.createDataFrame(rowsForRecord, dataType).union(data);
-
-            data.show();
+//            data = SPARK.createDataFrame(rowsForRecord, resType);
+//            data.show();
+//        }else{
+//
+//            for (Row newDataRow : newDataRows) {
+//                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, dataType, SparkWorker.WORK_TABLE,data));
+//            }
+//
+//            data = SPARK.createDataFrame(rowsForRecord, dataType).union(data);
+//
+//            data.show();
         }
 
     }
+
+    private Dataset<Row> conversionDataForType(Dataset<Row> myData, StructType dataType) {
+        List<Row> resList = new ArrayList<>();
+        for (Row row : myData.collectAsList()) {
+            resList.add(getNewRowForType(row, dataType));
+        }
+
+        return SPARK.createDataFrame(resList, dataType);
+
+    }
+
+    private Row getNewRowForType(Row row, StructType dataType) {
+        String [] newRowData = dataType.fieldNames();
+        for (int i = 0; i <newRowData.length ; i++) {
+            newRowData[i] = (isFieldWithName(newRowData[i], row))
+                    ? getDataFromField(row, newRowData[i])
+                    : null;
+        }
+
+        return createRowWithCentralSchema(newRowData , dataType);
+    }
+
+    private Row createRowWithCentralSchema(String[] newRowData, StructType structType) {
+        Row row = RowFactory.create(newRowData);
+        return SPARK.
+                createDataFrame(Collections.singletonList(row), structType)
+                .first();
+    }
+
+    private String getDataFromField(Row row, String fieldName) {
+        int index = row.schema().fieldIndex(fieldName);
+        return row.getString(index);
+    }
+
+    private boolean isFieldWithName(String fieldName, Row row) {
+        for (StructField field : row.schema().fields()) {
+            if(field.name().equals(fieldName))
+                return true;
+        }
+        return false;
+    }
+
+//    private List<Row>  getRos
 
 
 
@@ -112,10 +167,32 @@ public class AddNewColumn implements Serializable {
 
     private Dataset<Row> getDataFromMySql(String db, String table, Path dirPath) throws IOException, InterruptedException {
         Dataset<Row> data;
-//        SW.sqoopImportTableToHDFS(db, table, dirPath);
-        data = SW.getDatasetFromDir(dirPath.toString());
+        sqoopImportTableToHDFS(db, table, dirPath.toString());
+        data = getDatasetFromDir(dirPath.toString());
         data.show();
         return data;
+    }
+
+    private void sqoopImportTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
+
+        System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath );
+
+        RT.exec(String.format("sqoop import " +
+                "--connect \"jdbc:mysql://localhost:3306/%s?serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL\" " +
+                "--username \"vladimir\"  " +
+                "--password-file /user/sqoop.password " +
+                "--table %s " +
+                "--target-dir %s " +
+                "--split-by user_id  " +
+                "--as-avrodatafile",nameDB,tableName,compileToPath))
+                .waitFor();
+    }
+
+    private Dataset<Row> getDatasetFromDir(String userDirPath) {
+
+        System.out.println("Spark read data from dir: "+userDirPath);
+
+        return SPARK.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
     }
 
 
@@ -124,7 +201,7 @@ public class AddNewColumn implements Serializable {
         try {
             new AddNewColumn().getDataFromTable();
 
-        } catch (IOException | InterruptedException | MoreOneUserWithIdException e) {
+        } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
     }

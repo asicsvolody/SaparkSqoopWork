@@ -169,7 +169,7 @@ public class SparkWorker {
 
     }
 
-    public void saveToHDFS(Path dirPath) throws IOException {
+    private void saveToHDFS(Path dirPath) throws IOException {
 
         System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
 
@@ -288,7 +288,7 @@ public class SparkWorker {
     }
 
 
-    public void sqoopImportTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
+    private void sqoopImportTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
 
         System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath );
 
@@ -303,7 +303,7 @@ public class SparkWorker {
                 .waitFor();
     }
 
-    public void sqoopExportTable(String nameDB, String tableName, String exportFromPath) throws IOException, InterruptedException {
+    private void sqoopExportTable(String nameDB, String tableName, String exportFromPath) throws IOException, InterruptedException {
 
         System.out.println("Sqoop exports to table:" +tableName+" of database " + nameDB+ "from path directory: "+ exportFromPath );
 
