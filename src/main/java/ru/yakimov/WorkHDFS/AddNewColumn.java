@@ -8,6 +8,7 @@ import org.apache.spark.SparkContext;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.storage.StorageLevel;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -57,52 +58,37 @@ public class AddNewColumn implements Serializable {
         Dataset<Row> newData = getDataFromMySql(NEW_DATA_DB, NEW_DATA_TABLE, NEW_DATA_DIR);
         StructType newDataType = newData.first().schema();
 
-
-        List<Row> rowsForRecord = new ArrayList<>();
-
-        List<Row> newDataRows = new ArrayList<>(newData.collectAsList());
-
-
         StructField[] newFields = getNewFields(dataType, newDataType);
 
         if(newFields != null){
-            StructField[] oldFields = dataType.fields();
-            dataType = new StructType(ArrayUtils.addAll(newFields,oldFields));
+            dataType = getNewStructType(dataType, newFields);
+
             System.out.println(dataType.toString());
-            data = data.map( );
 
+            data = conversionDataForType(data.collectAsList(), dataType);
 
-//             data = conversionDataForType(data, dataType);
-             data.show();
-
-
-//            newDataRows.addAll(newData.collectAsList());
-
-
-
-
-//            for (Row newDataRow : newDataRows) {
-//                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, resType, SparkWorker.WORK_TABLE, data));
-//            }
-//
-//            data = SPARK.createDataFrame(rowsForRecord, resType);
-//            data.show();
-//        }else{
-//
-//            for (Row newDataRow : newDataRows) {
-//                rowsForRecord.add(SW.insertRow(newDataRow, PRIMARY_KEY, dataType, SparkWorker.WORK_TABLE,data));
-//            }
-//
-//            data = SPARK.createDataFrame(rowsForRecord, dataType).union(data);
-//
-//            data.show();
+            data.show();
         }
+
+        data =  data
+                .union(conversionDataForType(newData.collectAsList(), dataType))
+                .sort(PRIMARY_KEY)
+                .persist(StorageLevel.MEMORY_AND_DISK());
+        data.show();
+
+        saveToHDFS(SparkWorker.USER_DIR_PATH, data);
 
     }
 
-    private Dataset<Row> conversionDataForType(Dataset<Row> myData, StructType dataType) {
+    private StructType getNewStructType(StructType dataType, StructField[] newFields) {
+        StructField[] oldFields = dataType.fields();
+        dataType = new StructType(ArrayUtils.addAll(newFields,oldFields));
+        return dataType;
+    }
+
+    private Dataset<Row> conversionDataForType(List<Row> myDataList, StructType dataType) {
         List<Row> resList = new ArrayList<>();
-        for (Row row : myData.collectAsList()) {
+        for (Row row : myDataList) {
             resList.add(getNewRowForType(row, dataType));
         }
 
@@ -193,6 +179,18 @@ public class AddNewColumn implements Serializable {
         System.out.println("Spark read data from dir: "+userDirPath);
 
         return SPARK.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
+    }
+
+    private void saveToHDFS(Path dirPath, Dataset<Row> data)  throws IOException {
+
+        System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
+
+        if(FS.exists(dirPath))
+            FS.delete(dirPath, true);
+
+
+        data.write().option("header", true).option("inferSchema", true).format("avro").save(dirPath.toString());
+
     }
 
 
