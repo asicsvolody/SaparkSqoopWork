@@ -14,11 +14,12 @@ import ru.yakimov.WorkHDFS.Exceptions.MoreOneUserWithIdException;
 import ru.yakimov.WorkHDFS.Exceptions.NotDirectoryException;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class SparkWorker {
+public class SparkWorker implements Serializable {
 
     private SparkSession spark;
 

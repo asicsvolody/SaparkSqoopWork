@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class AddNewColumn implements Serializable {
+public class AddNewColumnWithJavaCode implements Serializable {
 
 
     private final SparkSession SPARK;
@@ -27,12 +27,12 @@ public class AddNewColumn implements Serializable {
 
 
 
-    public static final Path NEW_DATA_DIR = new Path("/avroData/newData");
-    public static final String NEW_DATA_DB = "newUsersDB";
-    public static final String NEW_DATA_TABLE = "newData";
+    private static final Path NEW_DATA_DIR = new Path("/avroData/newData");
+    private static final String NEW_DATA_DB = "newUsersDB";
+    private static final String NEW_DATA_TABLE = "newData";
 
 
-    public AddNewColumn() throws IOException {
+    public AddNewColumnWithJavaCode() throws IOException {
         SparkContext context = new SparkContext(new SparkConf().setAppName("spark-App").setMaster("local[*]")
                 .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
                 .set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
@@ -61,6 +61,8 @@ public class AddNewColumn implements Serializable {
         StructField[] newFields = getNewFields(dataType, newDataType);
 
         if(newFields != null){
+            System.out.println(dataType.toString());
+
             dataType = getNewStructType(dataType, newFields);
 
             System.out.println(dataType.toString());
@@ -74,9 +76,14 @@ public class AddNewColumn implements Serializable {
                 .union(conversionDataForType(newData.collectAsList(), dataType))
                 .sort(PRIMARY_KEY)
                 .persist(StorageLevel.MEMORY_AND_DISK());
+
         data.show();
 
         saveToHDFS(SparkWorker.USER_DIR_PATH, data);
+
+        System.out.println("Читаю из записанного: ");
+
+        getDatasetFromDir(SparkWorker.USER_DIR_PATH.toString()).show();
 
     }
 
@@ -97,26 +104,28 @@ public class AddNewColumn implements Serializable {
     }
 
     private Row getNewRowForType(Row row, StructType dataType) {
-        String [] newRowData = dataType.fieldNames();
+        String [] fieldNames = dataType.fieldNames();
+        Object[] newRowData = new Object[fieldNames.length];
+
         for (int i = 0; i <newRowData.length ; i++) {
-            newRowData[i] = (isFieldWithName(newRowData[i], row))
-                    ? getDataFromField(row, newRowData[i])
+            newRowData[i] = (isFieldWithName(fieldNames[i], row))
+                    ? getDataFromField(row, fieldNames[i])
                     : null;
         }
 
-        return createRowWithCentralSchema(newRowData , dataType);
+        return createRowWithSchema(newRowData , dataType);
     }
 
-    private Row createRowWithCentralSchema(String[] newRowData, StructType structType) {
+    private Row createRowWithSchema(Object[] newRowData, StructType structType) {
         Row row = RowFactory.create(newRowData);
         return SPARK.
                 createDataFrame(Collections.singletonList(row), structType)
                 .first();
     }
 
-    private String getDataFromField(Row row, String fieldName) {
+    private Object getDataFromField(Row row, String fieldName) {
         int index = row.schema().fieldIndex(fieldName);
-        return row.getString(index);
+        return row.get(index);
     }
 
     private boolean isFieldWithName(String fieldName, Row row) {
@@ -127,11 +136,10 @@ public class AddNewColumn implements Serializable {
         return false;
     }
 
-//    private List<Row>  getRos
-
 
 
     private StructField[] getNewFields(StructType dataType, StructType newDataType) {
+
         StructField[] newDataFields = newDataType.fields();
         List<StructField> structFieldList = new ArrayList<>();
         for (StructField newDataField : newDataFields) {
@@ -153,15 +161,16 @@ public class AddNewColumn implements Serializable {
 
     private Dataset<Row> getDataFromMySql(String db, String table, Path dirPath) throws IOException, InterruptedException {
         Dataset<Row> data;
-        sqoopImportTableToHDFS(db, table, dirPath.toString());
+        sqoopImportTableToHDFS(db, table, dirPath);
         data = getDatasetFromDir(dirPath.toString());
         data.show();
         return data;
     }
 
-    private void sqoopImportTableToHDFS(String nameDB, String tableName, String compileToPath) throws IOException, InterruptedException {
-
-        System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath );
+    private void sqoopImportTableToHDFS(String nameDB, String tableName, Path compileToPath) throws IOException, InterruptedException {
+        if(FS.exists(compileToPath))
+            FS.delete(compileToPath, true);
+        System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath.toString() );
 
         RT.exec(String.format("sqoop import " +
                 "--connect \"jdbc:mysql://localhost:3306/%s?serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL\" " +
@@ -170,7 +179,7 @@ public class AddNewColumn implements Serializable {
                 "--table %s " +
                 "--target-dir %s " +
                 "--split-by user_id  " +
-                "--as-avrodatafile",nameDB,tableName,compileToPath))
+                "--as-avrodatafile",nameDB,tableName,compileToPath.toString()))
                 .waitFor();
     }
 
@@ -194,10 +203,9 @@ public class AddNewColumn implements Serializable {
     }
 
 
-
     public static void main(String[] args) {
         try {
-            new AddNewColumn().getDataFromTable();
+            new AddNewColumnWithJavaCode().getDataFromTable();
 
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
