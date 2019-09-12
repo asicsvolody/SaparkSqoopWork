@@ -52,7 +52,7 @@ public class CreateStructTableToCSV implements Serializable {
 
         rt  = Runtime.getRuntime();
 
-//        sqoopImportFieldsTable(IMPORT_AVRO_STRUCT_TABLE ,TITLE_DB, TITLE_TABLE);
+        sqoopImportFieldsTable(IMPORT_AVRO_STRUCT_TABLE ,TITLE_DB, TITLE_TABLE);
         sqoopImportFieldsTableWithProcessBuilder(IMPORT_AVRO_STRUCT_TABLE ,TITLE_DB, TITLE_TABLE);
 
 

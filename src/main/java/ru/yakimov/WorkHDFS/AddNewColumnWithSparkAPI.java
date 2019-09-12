@@ -4,6 +4,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
@@ -49,7 +50,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
 
     }
 
-    private void getDataFromTable() throws IOException, InterruptedException {
+    private void getDataFromTable() throws IOException, InterruptedException, TypeNotSameException {
 
         Dataset<Row> data = getDataFromMySql(SparkWorker.WORK_DB, SparkWorker.WORK_TABLE, SparkWorker.USER_DIR_PATH);
         dataType = data.first().schema();
@@ -59,6 +60,13 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         newDataType.printTreeString();
 
         StructField[] newFields = getNewFields(dataType, newDataType);
+
+        //####
+
+        JavaRDD<Row> dataRdd = data.javaRDD().map(this::getNewRowForType);
+        System.out.println(dataRdd.first().get(5));
+
+        //#####
 
         if(newFields!= null){
 
@@ -109,16 +117,11 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         return newDataTypeHashMap.toArray(new StructField[0]);
     }
 
-    private Dataset<Row> conversionDataForType(List<Row> myDataList) {
+    private Dataset<Row> conversionDataForType(List<Row> myDataList) throws TypeNotSameException {
         List<Row> resList = new ArrayList<>();
         for (Row row : myDataList) {
 
-            try {
                 resList.add(getNewRowForType(row));
-
-            } catch (TypeNotSameException e) {
-                e.printStackTrace();
-            }
         }
 
         return SPARK.createDataFrame(resList, dataType);
@@ -174,7 +177,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
 
     private Dataset<Row> getDataFromMySql(String db, String table, Path dirPath) throws IOException, InterruptedException {
         Dataset<Row> data;
-        sqoopImportTableToHDFS(db, table, dirPath);
+//        sqoopImportTableToHDFS(db, table, dirPath);
         data = getDatasetFromDir(dirPath.toString());
         data.show();
         return data;
@@ -185,15 +188,17 @@ public class AddNewColumnWithSparkAPI implements Serializable {
             FS.delete(compileToPath, true);
         System.out.println("Sqoop imports table: " +tableName+" of database " + nameDB+ " to path directory: "+compileToPath.toString() );
 
-        RT.exec(String.format("sqoop import " +
+        Process process = RT.exec(String.format("sqoop import " +
                 "--connect \"jdbc:mysql://localhost:3306/%s?serverTimezone=UTC&zeroDateTimeBehavior=CONVERT_TO_NULL\" " +
                 "--username \"vladimir\"  " +
                 "--password-file /user/sqoop.password " +
                 "--table %s " +
                 "--target-dir %s " +
                 "--split-by user_id  " +
-                "--as-avrodatafile",nameDB,tableName,compileToPath.toString()))
-                .waitFor();
+                "--as-avrodatafile",nameDB,tableName,compileToPath.toString()));
+        process.waitFor();
+        CreateStructTableToCSV.printProcessErrorStream(process);
+
     }
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
@@ -220,7 +225,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         try {
             new AddNewColumnWithSparkAPI().getDataFromTable();
 
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException | InterruptedException | TypeNotSameException e) {
             e.printStackTrace();
         }
     }
