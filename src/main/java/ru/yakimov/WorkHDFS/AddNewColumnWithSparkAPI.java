@@ -51,7 +51,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
 
     }
 
-    private void getDataFromTable() throws IOException, InterruptedException, TypeNotSameException {
+    private void getDataFromTable() throws IOException, InterruptedException {
 
         Dataset<Row> data = getDataFromMySql(SparkWorker.WORK_DB, SparkWorker.WORK_TABLE, SparkWorker.USER_DIR_PATH);
         dataType = data.first().schema();
@@ -67,17 +67,12 @@ public class AddNewColumnWithSparkAPI implements Serializable {
 
         data = data.join(
                         newData
-                                .select(PRIMARY_KEY, newFields)
                         , data.col(PRIMARY_KEY).equalTo(newData.col(PRIMARY_KEY))
                         , "left")
                 .select(getUsingCols(data, newData, dataType))
                 .union(
                         newData.join(
                                 data
-                                .select(
-                                        PRIMARY_KEY
-                                        , getNewFieldsNames(newData.first().schema()
-                                        , data.first().schema()))
                                 ,newData.col(PRIMARY_KEY).equalTo(data.col(PRIMARY_KEY))
                                 ,"left")
                 .select(getUsingCols(newData, data, dataType)))
@@ -202,7 +197,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         try {
             new AddNewColumnWithSparkAPI().getDataFromTable();
 
-        } catch (IOException | InterruptedException | TypeNotSameException e) {
+        } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
     }
