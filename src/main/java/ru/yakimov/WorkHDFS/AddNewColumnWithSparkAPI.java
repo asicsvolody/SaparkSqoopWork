@@ -4,8 +4,8 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
-import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.*;
+import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.storage.StorageLevel;
@@ -30,6 +30,7 @@ public class AddNewColumnWithSparkAPI implements Serializable {
     private static final Path NEW_DATA_DIR = new Path("/avroData/newData");
     private static final String NEW_DATA_DB = "newUsersDB";
     private static final String NEW_DATA_TABLE = "newData";
+    private DataType dataType1;
 
 
     private AddNewColumnWithSparkAPI() throws IOException {
@@ -56,32 +57,32 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         dataType = data.first().schema();
 
         Dataset<Row> newData = getDataFromMySql(NEW_DATA_DB, NEW_DATA_TABLE, NEW_DATA_DIR);
+
         StructType newDataType = newData.first().schema();
         newDataType.printTreeString();
 
-        StructField[] newFields = getNewFields(dataType, newDataType);
+        String[] newFields = getNewFieldsNames(dataType, newDataType);
+        dataType = getNewStructType(dataType, newDataType);
 
-        //####
 
-        JavaRDD<Row> dataRdd = data.javaRDD().map(this::getNewRowForType);
-        System.out.println(dataRdd.first().get(5));
-
-        //#####
-
-        if(newFields!= null){
-
-            for (StructField newField : newFields) {
-                System.out.println(newField.name());
-                dataType = getNewStructType(dataType, newDataType);
-                data = conversionDataForType(data.collectAsList());
-            }
-            data.show();
-        }
-
-                data =  data
-                .union(conversionDataForType(newData.collectAsList()))
-                .sort(PRIMARY_KEY)
+        data = data.join(
+                        newData
+                                .select(PRIMARY_KEY, newFields)
+                        , data.col(PRIMARY_KEY).equalTo(newData.col(PRIMARY_KEY))
+                        , "left")
+                .select(getUsingCols(data, newData, dataType))
+                .union(
+                        newData.join(
+                                data
+                                .select(
+                                        PRIMARY_KEY
+                                        , getNewFieldsNames(newData.first().schema()
+                                        , data.first().schema()))
+                                ,newData.col(PRIMARY_KEY).equalTo(data.col(PRIMARY_KEY))
+                                ,"left")
+                .select(getUsingCols(newData, data, dataType)))
                 .persist(StorageLevel.MEMORY_AND_DISK());
+
 
         data.show();
 
@@ -92,6 +93,23 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         getDatasetFromDir(SparkWorker.USER_DIR_PATH.toString()).show();
 
     }
+
+    private Column[] getUsingCols(Dataset<Row> dataOne, Dataset<Row>  dataTwo, StructType dataType) {
+
+        List<Column> resCols = new ArrayList<>();
+        for (StructField field : dataType.fields()) {
+            if(dataOne.first().schema().contains(field)){
+                resCols.add(dataOne.col(field.name()));
+            }else{
+                resCols.add(dataTwo.col(field.name()));
+            }
+        }
+        return resCols.toArray(new Column[0]);
+    }
+
+
+
+
 
     private StructType getNewStructType(StructType dataType, StructType newDataType) {
 
@@ -107,38 +125,12 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         return new StructType(dataTypeFieldSet.toArray(new StructField[0]));
     }
 
-    private StructField[] getNewFields(StructType dataType, StructType newDataType) {
+    private String[] getNewFieldsNames(StructType dataType, StructType newDataType) {
 
-        Set<StructField> newDataTypeHashMap = new HashSet<>(Arrays.asList(newDataType.fields()));
-        List<StructField> dataList = Arrays.asList(dataType.fields());
-        if(dataList.containsAll(newDataTypeHashMap))
-            return null;
+        Set<String> newDataTypeHashMap = new HashSet<>(Arrays.asList(newDataType.fieldNames()));
+        List<String> dataList = Arrays.asList(dataType.fieldNames());
         newDataTypeHashMap.removeAll(dataList);
-        return newDataTypeHashMap.toArray(new StructField[0]);
-    }
-
-    private Dataset<Row> conversionDataForType(List<Row> myDataList) throws TypeNotSameException {
-        List<Row> resList = new ArrayList<>();
-        for (Row row : myDataList) {
-
-                resList.add(getNewRowForType(row));
-        }
-
-        return SPARK.createDataFrame(resList, dataType);
-
-    }
-
-    private Row getNewRowForType(Row row) throws TypeNotSameException {
-        StructField [] fieldNames = dataType.fields();
-        Object[] newRowData = new Object[fieldNames.length];
-
-        for (int i = 0; i <newRowData.length ; i++) {
-
-            newRowData[i] = getDataFromField(fieldNames[i], row);
-
-        }
-
-        return createRowWithSchema(newRowData);
+        return newDataTypeHashMap.toArray(new String[0]);
     }
 
     private boolean isFieldWithName(StructField fieldForCheck, Row row) throws TypeNotSameException {
@@ -155,29 +147,14 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         return false;
     }
 
-    private Row createRowWithSchema(Object[] newRowData) {
-        Row row = RowFactory.create(newRowData);
-        return SPARK.
-                createDataFrame(Collections.singletonList(row), dataType)
-                .first();
-    }
 
-    private Object getDataFromField( StructField field, Row row ) throws TypeNotSameException {
-        if(isFieldWithName(field, row)) {
-            int index = row.schema().fieldIndex(field.name());
-            return row.get(index);
-        }
-
-        return null;
-
-    }
 
 
 
 
     private Dataset<Row> getDataFromMySql(String db, String table, Path dirPath) throws IOException, InterruptedException {
         Dataset<Row> data;
-//        sqoopImportTableToHDFS(db, table, dirPath);
+        sqoopImportTableToHDFS(db, table, dirPath);
         data = getDatasetFromDir(dirPath.toString());
         data.show();
         return data;
