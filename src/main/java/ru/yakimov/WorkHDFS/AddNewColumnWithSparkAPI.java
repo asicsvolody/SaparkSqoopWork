@@ -5,11 +5,9 @@ import org.apache.hadoop.fs.Path;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
 import org.apache.spark.sql.*;
-import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.storage.StorageLevel;
-import ru.yakimov.WorkHDFS.Exceptions.TypeNotSameException;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -30,7 +28,6 @@ public class AddNewColumnWithSparkAPI implements Serializable {
     private static final Path NEW_DATA_DIR = new Path("/avroData/newData");
     private static final String NEW_DATA_DB = "newUsersDB";
     private static final String NEW_DATA_TABLE = "newData";
-    private DataType dataType1;
 
 
     private AddNewColumnWithSparkAPI() throws IOException {
@@ -61,7 +58,6 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         StructType newDataType = newData.first().schema();
         newDataType.printTreeString();
 
-        String[] newFields = getNewFieldsNames(dataType, newDataType);
         dataType = getNewStructType(dataType, newDataType);
 
 
@@ -69,13 +65,14 @@ public class AddNewColumnWithSparkAPI implements Serializable {
                         newData
                         , data.col(PRIMARY_KEY).equalTo(newData.col(PRIMARY_KEY))
                         , "left")
-                .select(getUsingCols(data, newData, dataType))
+                    .select(getUsingCols(data, newData, dataType))
                 .union(
                         newData.join(
-                                data
-                                ,newData.col(PRIMARY_KEY).equalTo(data.col(PRIMARY_KEY))
-                                ,"left")
-                .select(getUsingCols(newData, data, dataType)))
+                                    data
+                                    ,newData.col(PRIMARY_KEY).equalTo(data.col(PRIMARY_KEY))
+                                    ,"left")
+                                .select(getUsingCols(newData, data, dataType))
+                )
                 .persist(StorageLevel.MEMORY_AND_DISK());
 
 
@@ -103,15 +100,10 @@ public class AddNewColumnWithSparkAPI implements Serializable {
     }
 
 
-
-
-
     private StructType getNewStructType(StructType dataType, StructType newDataType) {
 
         Set<StructField> dataTypeFieldSet = new HashSet<>(Arrays.asList(dataType.fields()));
         List<StructField> newDataList = Arrays.asList(newDataType.fields());
-
-
 
         if(dataTypeFieldSet.containsAll(newDataList))
             return dataType;
@@ -119,33 +111,6 @@ public class AddNewColumnWithSparkAPI implements Serializable {
         dataTypeFieldSet.addAll(newDataList);
         return new StructType(dataTypeFieldSet.toArray(new StructField[0]));
     }
-
-    private String[] getNewFieldsNames(StructType dataType, StructType newDataType) {
-
-        Set<String> newDataTypeHashMap = new HashSet<>(Arrays.asList(newDataType.fieldNames()));
-        List<String> dataList = Arrays.asList(dataType.fieldNames());
-        newDataTypeHashMap.removeAll(dataList);
-        return newDataTypeHashMap.toArray(new String[0]);
-    }
-
-    private boolean isFieldWithName(StructField fieldForCheck, Row row) throws TypeNotSameException {
-        for (StructField field : row.schema().fields()) {
-
-            if(field.name().equals(fieldForCheck.name())){
-
-                if(!field.dataType().equals(fieldForCheck.dataType()))
-                    throw new TypeNotSameException(field.dataType(), fieldForCheck.dataType());
-
-                return true;
-            }
-        }
-        return false;
-    }
-
-
-
-
-
 
     private Dataset<Row> getDataFromMySql(String db, String table, Path dirPath) throws IOException, InterruptedException {
         Dataset<Row> data;
