@@ -122,14 +122,14 @@ public class SparkWorker implements Serializable {
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
 
-        System.out.println("Spark read data from dir: "+userDirPath);
+        System.out.println("InitSingle read data from dir: "+userDirPath);
 
         return spark.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
     }
 
     private void usingNewDataFromDir(String dirPath) {
 
-        System.out.println("Spark using new Data from dir: "+dirPath);
+        System.out.println("InitSingle using new Data from dir: "+dirPath);
 
         List<Row> newRows = new ArrayList<>();
 
@@ -172,7 +172,7 @@ public class SparkWorker implements Serializable {
 
     private void saveToHDFS(Path dirPath) throws IOException {
 
-        System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
+        System.out.println("InitSingle write Dataset to HDFS path: "+dirPath.toString());
 
         if(fs.exists(dirPath))
             fs.delete(dirPath, true);

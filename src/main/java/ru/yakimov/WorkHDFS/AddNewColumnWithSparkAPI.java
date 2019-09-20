@@ -2,8 +2,6 @@ package ru.yakimov.WorkHDFS;
 
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.spark.SparkConf;
-import org.apache.spark.SparkContext;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
@@ -30,22 +28,13 @@ public class AddNewColumnWithSparkAPI implements Serializable {
     private static final String NEW_DATA_TABLE = "newData";
 
 
-    private AddNewColumnWithSparkAPI() throws IOException {
-        SparkContext context = new SparkContext(new SparkConf().setAppName("spark-App").setMaster("local[*]")
-                .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
-                .set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
-                .set("spark.hadoop.fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName())
-                .set("spark.hadoop.fs.hdfs.server", org.apache.hadoop.hdfs.server.namenode.NameNode.class.getName())
-                .set("spark.hadoop.conf", org.apache.hadoop.hdfs.HdfsConfiguration.class.getName()));
+    private AddNewColumnWithSparkAPI() {
 
-        context.setLogLevel("WARN");
+        SPARK = InitSingle.getInstance().getSpark();
 
-        SPARK = SparkSession.builder().sparkContext(context).getOrCreate();
+        FS = InitSingle.getInstance().getFs();
 
-        RT = Runtime.getRuntime();
-
-        FS = FileSystem.get(context.hadoopConfiguration());
-
+        RT = InitSingle.getInstance().getRt();
     }
 
     private void getDataFromTable() throws IOException, InterruptedException {
@@ -140,14 +129,14 @@ public class AddNewColumnWithSparkAPI implements Serializable {
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
 
-        System.out.println("Spark read data from dir: "+userDirPath);
+        System.out.println("InitSingle read data from dir: "+userDirPath);
 
         return SPARK.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
     }
 
     private void saveToHDFS(Path dirPath, Dataset<Row> data)  throws IOException {
 
-        System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
+        System.out.println("InitSingle write Dataset to HDFS path: "+dirPath.toString());
 
         if(FS.exists(dirPath))
             FS.delete(dirPath, true);

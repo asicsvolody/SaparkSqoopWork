@@ -32,21 +32,12 @@ public class AddNewColumnWithJavaCode implements Serializable {
     private static final String NEW_DATA_TABLE = "newData";
 
 
-    public AddNewColumnWithJavaCode() throws IOException {
-        SparkContext context = new SparkContext(new SparkConf().setAppName("spark-App").setMaster("local[*]")
-                .set("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
-                .set("spark.hadoop.fs.defaultFS", "hdfs://localhost:30050")
-                .set("spark.hadoop.fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName())
-                .set("spark.hadoop.fs.hdfs.server", org.apache.hadoop.hdfs.server.namenode.NameNode.class.getName())
-                .set("spark.hadoop.conf", org.apache.hadoop.hdfs.HdfsConfiguration.class.getName()));
+    public AddNewColumnWithJavaCode() {
+        SPARK = InitSingle.getInstance().getSpark();
 
-        context.setLogLevel("WARN");
+        FS = InitSingle.getInstance().getFs();
 
-        SPARK = SparkSession.builder().sparkContext(context).getOrCreate();
-
-        RT = Runtime.getRuntime();
-
-        FS = FileSystem.get(context.hadoopConfiguration());
+        RT = InitSingle.getInstance().getRt();
 
     }
 
@@ -185,14 +176,14 @@ public class AddNewColumnWithJavaCode implements Serializable {
 
     private Dataset<Row> getDatasetFromDir(String userDirPath) {
 
-        System.out.println("Spark read data from dir: "+userDirPath);
+        System.out.println("InitSingle read data from dir: "+userDirPath);
 
         return SPARK.read().option("header", true).option("inferSchema", true).format("avro").load(userDirPath + "/*.avro");
     }
 
     private void saveToHDFS(Path dirPath, Dataset<Row> data)  throws IOException {
 
-        System.out.println("Spark write Dataset to HDFS path: "+dirPath.toString());
+        System.out.println("InitSingle write Dataset to HDFS path: "+dirPath.toString());
 
         if(FS.exists(dirPath))
             FS.delete(dirPath, true);

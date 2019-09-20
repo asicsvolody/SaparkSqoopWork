@@ -35,22 +35,11 @@ public class CreateStructTableToCSV implements Serializable {
 
     public CreateStructTableToCSV() throws IOException, InterruptedException {
 
-        spark = SparkSession
-                .builder()
-                .appName("Create CSV")
-                .config("spark.master", "local")
-                .config("spark.hadoop.fs.default.name", "hdfs://localhost:8020")
-                .config("spark.hadoop.fs.defaultFS", "hdfs://localhost:8020")
-                .config("spark.hadoop.fs.hdfs.impl", org.apache.hadoop.hdfs.DistributedFileSystem.class.getName())
-                .config("spark.hadoop.fs.hdfs.server", org.apache.hadoop.hdfs.server.namenode.NameNode.class.getName())
-                .config("spark.hadoop.conf", org.apache.hadoop.hdfs.HdfsConfiguration.class.getName())
-                .getOrCreate();
+        spark = InitSingle.getInstance().getSpark();
 
-        spark.sparkContext().setLogLevel("WARN");
+        fs = InitSingle.getInstance().getFs();
 
-        fs = FileSystem.get(spark.sparkContext().hadoopConfiguration());
-
-        rt  = Runtime.getRuntime();
+        rt = InitSingle.getInstance().getRt();
 
         sqoopImportFieldsTable(IMPORT_AVRO_STRUCT_TABLE ,TITLE_DB, TITLE_TABLE);
         sqoopImportFieldsTableWithProcessBuilder(IMPORT_AVRO_STRUCT_TABLE ,TITLE_DB, TITLE_TABLE);
