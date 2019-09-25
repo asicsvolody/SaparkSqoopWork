@@ -84,7 +84,7 @@ public class AddNewColumnWithJavaCode implements Serializable {
         return dataType;
     }
 
-    private Dataset<Row> conversionDataForType(List<Row> myDataList, StructType dataType) {
+    public Dataset<Row> conversionDataForType(List<Row> myDataList, StructType dataType) {
         List<Row> resList = new ArrayList<>();
         for (Row row : myDataList) {
             resList.add(getNewRowForType(row, dataType));
@@ -103,7 +103,6 @@ public class AddNewColumnWithJavaCode implements Serializable {
                     ? getDataFromField(row, fieldNames[i])
                     : null;
         }
-
         return createRowWithSchema(newRowData , dataType);
     }
 

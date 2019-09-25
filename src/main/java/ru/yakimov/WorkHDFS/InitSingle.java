@@ -8,7 +8,7 @@ import org.apache.spark.sql.SparkSession;
 import java.io.IOException;
 
 public class InitSingle {
-    private static InitSingle instance;
+    private static volatile InitSingle instance;
 
     private SparkSession spark;
     private FileSystem fs;
@@ -31,14 +31,22 @@ public class InitSingle {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
     }
 
     public static InitSingle getInstance() {
-        if(instance == null){
-            instance = new InitSingle();
+        InitSingle localInstance = instance;
+        if(localInstance == null){
+            synchronized (InitSingle.class){
+                localInstance = instance;
+                if(localInstance == null){
+                    localInstance = instance = new InitSingle();
+                }
+            }
         }
-        return instance;
+        return  localInstance;
     }
+
 
     public SparkSession getSpark() {
         return spark;
